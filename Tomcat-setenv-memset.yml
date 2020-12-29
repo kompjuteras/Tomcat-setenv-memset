@@ -1,0 +1,40 @@
+- hosts: all
+  become: yes
+  become_user: root
+  become_method: sudo
+  ignore_errors: false
+  any_errors_fatal: true
+
+  vars:
+    # Configure path to your Tomcat setenv
+    setenv_path: "/opt/tomcat/bin/setenv.sh"
+
+  handlers:
+
+    - name: Restart Tomcat
+      service:
+        name: tomcat
+        state: restarted
+
+  tasks:
+
+    - name: Get current/old heap size
+      shell: set -o pipefail && awk -F= '/^let MINMAXMEM=/ {print $2}' '{{ setenv_path }}' | grep -Eo '^[^ ]+'
+      register: old_heap
+      changed_when: False
+
+    - name: Report current and new values for memory and heap size
+      debug:
+        msg:
+          - "Total RAM ------> {{ ansible_memtotal_mb }} MB"
+          - "New Heap size --> {{ (ansible_memtotal_mb * 0.75)|int }} MB"
+          - "Old Heap size --> {{ old_heap.stdout|int }} MB"
+
+    - name: Replace old heap size with new, if its lower
+      replace:
+        path: '{{ setenv_path }}'
+        regexp:  '^let MINMAXMEM=.*[0-9]'
+        replace: 'let MINMAXMEM={{ (ansible_memtotal_mb * 0.75)|int }}'
+        backup: yes
+      when: (ansible_memtotal_mb * 0.75)|int > old_heap.stdout|int
+      notify: Restart Tomcat
